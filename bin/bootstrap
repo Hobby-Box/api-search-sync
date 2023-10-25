@@ -2,13 +2,35 @@
 
 """PGSync bootstrap."""
 import logging
+import os
 
 import click
+import sqlalchemy as sa
+import sqlalchemy.exc as sa_exc
+from sqlalchemy.engine import create_engine
+from sqlalchemy.orm import Session
 
 from pgsync.sync import Sync
 from pgsync.utils import config_loader, get_config, show_settings
 
 logger = logging.getLogger(__name__)
+
+import contextlib
+
+
+@contextlib.contextmanager
+def get_session(database: str):
+    session = Session(
+        create_engine(
+            f"postgresql://{os.getenv('PG_USER')}:{os.getenv('PG_PASSWORD')}@{os.getenv('PG_HOST')}/{database}"
+        )
+    )
+    try:
+        yield session
+    except:
+        session.rollback()
+    finally:
+        session.close()
 
 
 @click.command()
@@ -48,6 +70,7 @@ def main(teardown, config, user, password, host, port, verbose):
             type=str,
             hide_input=True,
         )
+
     kwargs = {key: value for key, value in kwargs.items() if value is not None}
 
     config: str = get_config(config)
@@ -55,8 +78,36 @@ def main(teardown, config, user, password, host, port, verbose):
     show_settings(config)
 
     validate: bool = False if teardown else True
+    schema_version: str = os.getenv("SCHEMA_VERSION", "unset")
 
     for document in config_loader(config):
+        database: str = document["database"]
+        with get_session(database) as session:
+            try:
+                result = session.execute(
+                    sa.text("select data from syncdata where field = 'bootstrap'")
+                )
+                current_version: str = result.first()
+                print("Current state", current_version)
+                if current_version == schema_version:
+                    print("Skipping bootstrap")
+                    return
+                else:
+                    print(f"Out of sync. Starting sync to {schema_version}")
+            except sa_exc.ProgrammingError as e:
+                session.rollback()
+                if '"syncdata" does not exist' in e.args[0]:
+                    session.execute(
+                        sa.text(
+                            "create table syncdata (field varchar(30), data varchar(30));"
+                        )
+                    )
+                    session.close()
+                    return main(teardown, config, user, password, host, port, verbose)
+                else:
+                    raise
+
+        print("Running bootstrap")
         sync: Sync = Sync(
             document,
             verbose=verbose,
@@ -69,6 +120,11 @@ def main(teardown, config, user, password, host, port, verbose):
             continue
         sync.setup()
         logger.info(f"Bootstrap: {sync.database}")
+        with get_session(database) as session:
+            session.execute(
+                f"INSERT INTO syncdata VALUES ('bootstrap', '{schema_version}')"
+            )
+            session.commit()
 
 
 if __name__ == "__main__":

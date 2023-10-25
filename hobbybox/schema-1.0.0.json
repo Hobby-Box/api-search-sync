@@ -1,0 +1,12 @@
+[
+    {
+        "database": "hobbybox",
+        "index": "event",
+        "nodes": {
+            "table": "events",
+            "schema": "public",
+            "columns": ["id", "event_type", "address", "lat", "long"],
+            "children": []
+        }
+    }
+]

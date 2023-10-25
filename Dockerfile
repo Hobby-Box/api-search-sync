@@ -1,10 +1,17 @@
-FROM python:3.8
-ARG WORKDIR=/code
-RUN mkdir $WORKDIR
-ADD ./examples/ $WORKDIR/examples
-WORKDIR $WORKDIR
-RUN pip install git+https://github.com/toluaina/pgsync.git
-COPY ./docker/wait-for-it.sh wait-for-it.sh
-COPY ./docker/runserver.sh runserver.sh
-RUN chmod +x wait-for-it.sh
-RUN chmod +x runserver.sh
+FROM python:3.11
+ARG PGSYNC_VERSION=2.5.0
+ARG SCHEMA_VERSION=1.0.0
+
+LABEL org.label-schema.name "pgsync"
+LABEL org.label-schema.description "Postgres to OpenSearch sync"
+LABEL com.label-schema.service-type "daemon"
+
+ENV ELASTICSEARCH=false OPENSEARCH=true LOG_LEVEL=INFO SCHEMA_VERSION=${SCHEMA_VERSION} PATH=/pgsync/bin:${PATH}
+
+WORKDIR /pgsync
+ADD . .
+
+RUN pip install -e .
+
+
+ENTRYPOINT [ "runserver.sh" ]
